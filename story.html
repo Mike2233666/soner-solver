@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>海岛奇兵「声纳」活动 · 少炸几发的办法</title>
+<meta name="description" content="同一个声纳棋盘，瞎炸平均 95 发，按概率炸只要 40 发。讲清楚为什么能省一半，以及怎么用这个求解器。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="潜艇藏在海里，怎么少炸几发？">
+<meta property="og:description" content="瞎炸 95 发 → 按概率炸 40 发：炸概率最高的格子就够了。">
+<meta name="theme-color" content="#071627">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%230ea5e9'/%3E%3Ccircle cx='16' cy='16' r='7.5' fill='%23021121'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%2367e8f9'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #071627;
+    --card: rgba(16, 40, 66, .66);
+    --line: rgba(120, 180, 255, .16);
+    --text: #e9f2ff;
+    --muted: #93aecb;
+    --accent: #34d399;
+    --sky: #38bdf8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background:
+      radial-gradient(900px 520px at 8% -8%, rgba(24, 105, 165, .5), transparent 62%),
+      radial-gradient(700px 460px at 100% 4%, rgba(13, 118, 110, .22), transparent 58%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    line-height: 1.8;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 46px 22px 70px; }
+  h1 {
+    font-size: clamp(26px, 4.4vw, 38px); line-height: 1.35; margin: 0 0 14px; letter-spacing: -.3px;
+    background: linear-gradient(93deg, #a7f3d0, #7dd3fc 65%, #fdba74);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .lede { color: #cfe0f4; font-size: 17px; margin: 0 0 6px; }
+  .tag {
+    display: inline-block; font-size: 12.5px; padding: 2px 10px; border-radius: 999px;
+    border: 1px solid rgba(56, 189, 248, .32); background: rgba(14, 116, 144, .18);
+    color: #bae6fd; margin-bottom: 14px;
+  }
+  section { margin-top: 34px; }
+  h2 { font-size: 19px; margin: 0 0 8px; color: #dbeafe; }
+  p { margin: 10px 0; color: #d5e3f4; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 15px;
+    padding: 16px 18px; margin: 14px 0;
+  }
+  .big {
+    font-size: 21px; font-weight: 700; color: var(--accent);
+    letter-spacing: .3px;
+  }
+  .vs { color: var(--muted); }
+  ul { margin: 8px 0; padding-left: 20px; }
+  li { margin: 5px 0; }
+  figure { margin: 14px 0 0; }
+  figure img { width: 100%; border-radius: 13px; border: 1px solid var(--line); display: block; }
+  figcaption { color: var(--muted); font-size: 13px; margin-top: 7px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { color: var(--muted); font-size: 13px; font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .good { color: var(--accent); font-weight: 700; }
+  code {
+    background: rgba(56, 189, 248, .12); border: 1px solid rgba(56, 189, 248, .22);
+    border-radius: 6px; padding: 1px 6px; font-size: 13px; color: #bae6fd;
+  }
+  .note { color: var(--muted); font-size: 13.5px; }
+  footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  .wrap a { color: #7dd3fc; text-decoration: none; }
+  .wrap a:hover { text-decoration: underline; }
+  .cta {
+    display: inline-block; margin-top: 10px; padding: 10px 18px; border-radius: 999px;
+    background: rgba(52, 211, 153, .14); border: 1px solid rgba(52, 211, 153, .45);
+    color: #a7f3d0 !important; font-weight: 700; font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <span class="tag">海岛奇兵 · 声纳活动</span>
+  <h1>潜艇藏在海里，怎么少炸几发？</h1>
+  <p class="lede">
+    声纳活动里，海里藏着几艘潜艇，你用水雷一格一格炸。手感上全凭直觉，
+    但其实每一发都可以算出来该炸哪 —— 这个页面就是那个算法，以及它到底能省多少。
+  </p>
+
+  <section>
+    <h2>先说结论</h2>
+    <div class="card">
+      <p style="margin:0 0 6px"><span class="big">瞎炸 95 发　→　按概率炸 40 发</span></p>
+      <p class="note" style="margin:0">
+        10×10 的棋盘、六艘潜艇（长度 5,4,4,3,3,2）。同样的棋盘重复很多局取平均：
+        随机炸平均 95.2 发，按概率炸平均 39.7 发 —— 少一半还多。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>为什么能省</h2>
+    <p>
+      这个玩法里，炸中一格只亮一格，必须把整艘潜艇每一格都炸到，它才算被击沉。
+      所以：<strong>炸弹数 = 潜艇总格数 + 打空的次数</strong>。总格数是固定的，
+      真正能省的只有“打空”。
+    </p>
+    <p>
+      于是每发炸弹只做一件事：把所有“目前还说得通”的潜艇布局摆出来，
+      数一数每一格有多大概率有潜艇，炸概率最高的那格。
+    </p>
+    <div class="card">
+      <p style="margin:0">
+        炸空一格，这些布局会整体调整；炸中一格，相邻格子的概率会明显变高 ——
+        因为潜艇是连在一起的一条。<strong>所以“命中之后就顺着这条线补枪”，
+        不是额外写的规则，是概率自己冒出来的。</strong>
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>它长这样</h2>
+    <figure>
+      <img src="screenshot.png" alt="界面截图">
+      <figcaption>
+        橙色 ■ 是已经炸沉的潜艇，它周围 8 格变成 ·（那里不可能再有别的潜艇）；
+        其余格子上的百分比是“这格有潜艇”的概率，绿框就是推荐你炸的位置。
+      </figcaption>
+    </figure>
+    <figure>
+      <img src="screenshot_record.png" alt="手动记录界面">
+      <figcaption>
+        也能配合游戏本体用：炸完一格，在棋盘上点对应格子，选命中或未命中。
+        上图是命中两个 ● 之后，两侧格子概率跳到 50% 左右 —— 它在沿这条线补枪。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>实测数据</h2>
+    <div class="card">
+      <table>
+        <tr><th>棋盘</th><th>潜艇长度</th><th class="num">按概率炸</th><th class="num">随机炸</th></tr>
+        <tr><td>8×8</td><td>3,3,2</td><td class="num good">23.8</td><td class="num">57.5</td></tr>
+        <tr><td>10×10</td><td>4,3,3,2</td><td class="num good">35.7</td><td class="num">94.5</td></tr>
+        <tr><td>10×10</td><td>5,4,4,3,3,2</td><td class="num good">39.7</td><td class="num">95.2</td></tr>
+        <tr><td>12×12</td><td>5,4,4,3,3,2</td><td class="num good">50.9</td><td class="num">138.5</td></tr>
+      </table>
+      <p class="note" style="margin:10px 0 0">单位：发。每行是几百局随机棋盘的平均值。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>一句实话</h2>
+    <p>
+      每步都炸概率最高的格子，属于<strong>贪心</strong>，不保证全局最优。
+      我在四乘四的小棋盘上算过真正的最优：最优 6.111 发、贪心 6.167 发，差不到 1%——
+      而棋盘一大，算严格最优的代价就没边了。所以它是“足够好的近似”，不是最优解。
+    </p>
+  </section>
+
+  <section>
+    <h2>怎么用</h2>
+    <div class="card">
+      <ul>
+        <li>打开 <a href="index.html">求解器页面</a>，填棋盘大小和潜艇长度（例如 <code>10</code> 和 <code>5,4,4,3,3,2</code>）；</li>
+        <li>「自动对局」：在页面里直接玩，程序帮你报点；「自动演示」看它自己打完；</li>
+        <li>「手动记录」：配合游戏本体，每炸一格记一笔，下一发照样给你算；</li>
+        <li>进度自动保存，关掉页面再打开能接着上次。</li>
+      </ul>
+      <a class="cta" href="index.html">打开求解器 →</a>
+    </div>
+  </section>
+
+  <footer>
+    求解器本体：<a href="index.html">声纳搜潜 · 潜艇寻找器</a>；
+    更细的算法与全部测试见 <code>README.md</code>；短视频分镜见 <code>video_script.md</code>。
+  </footer>
+</div>
+</body>
+</html>
