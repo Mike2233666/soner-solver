@@ -355,6 +355,39 @@
     renderBanner();
   }
 
+  /* 宽容版局面视图：只按记录标格子，不做任何一致性校验。
+     记录自相矛盾（derive 会拒绝）时用它兜底，保证棋盘上还能看见已记录的格子。 */
+  function rawView(game) {
+    var n = game.n;
+    var N = n * n;
+    var water = new Uint8Array(N);
+    var hit = new Uint8Array(N);
+    var known = new Uint8Array(N);
+    var shot = new Uint8Array(N);
+    (game.shots || []).forEach(function (sh) {
+      if (!(sh.cell >= 0 && sh.cell < N)) return;
+      shot[sh.cell] = 1;
+      if (sh.result === 'miss') water[sh.cell] = 1;
+      else hit[sh.cell] = 1;
+    });
+    (game.sunk || []).forEach(function (s) {
+      (s.cells || []).forEach(function (c) {
+        if (!(c >= 0 && c < N)) return;
+        known[c] = 1;
+        hit[c] = 1;
+        shot[c] = 1;
+      });
+    });
+    if (game.noTouch) {
+      (game.sunk || []).forEach(function (s) {
+        SonarCore.neighborhood(n, s.cells || []).forEach(function (q) {
+          if (!known[q]) water[q] = 1;
+        });
+      });
+    }
+    return { n: n, N: N, water: water, hit: hit, known: known, shot: shot, pOcc: null };
+  }
+
   function renderBoard() {
     var board = $('board');
     if (!state.game) {
@@ -365,6 +398,12 @@
     }
     var n = state.game.n;
     var a = state.analysis;
+    // 分析失败（记录矛盾）时仍然把已记录的信息画出来：否则整个棋盘会变成一片空白，
+    // 看不出命中/未命中/已击沉，也没法判断该撤销哪一发。
+    var view = a;
+    if (!view) {
+      try { view = SonarCore.derive(state.game); } catch (e) { view = rawView(state.game); }
+    }
     var maxP = 0;
     if (a) for (var i = 0; i < a.pOcc.length; i++) if (a.pOcc[i] > maxP) maxP = a.pOcc[i];
     $('boardFrame').style.setProperty('--n', n);
@@ -383,18 +422,18 @@
       var text = '';
       var style = '';
       var title = '第 ' + (r + 1) + ' 行 第 ' + (c + 1) + ' 列';
-      if (a) {
-        if (a.known[cell]) { cls += ' known'; text = '■'; title += ' · 已击沉潜艇'; }
-        else if (a.hit[cell]) { cls += ' hit'; text = '●'; title += ' · 命中（这艘还没击沉）'; }
-        else if (a.shot[cell]) { cls += ' miss'; text = '×'; title += ' · 未命中'; }
-        else if (a.water[cell]) { cls += ' cleared'; text = '·'; title += ' · 已排除'; }
-        else {
+      if (view) {
+        if (view.known[cell]) { cls += ' known'; text = '■'; title += ' · 已击沉潜艇'; }
+        else if (view.hit[cell]) { cls += ' hit'; text = '●'; title += ' · 命中（这艘还没击沉）'; }
+        else if (view.shot[cell]) { cls += ' miss'; text = '×'; title += ' · 未命中'; }
+        else if (view.water[cell]) { cls += ' cleared'; text = '·'; title += ' · 已排除'; }
+        else if (a) {
           var p = a.pOcc[cell];
           style = 'background:' + heat(p, maxP) + ';color:' + (isLight(p, maxP) ? '#062033' : '#f8fafc') + ';';
           if (p > 0.004) text = Math.round(p * 100) + '%';
           title += ' · 有潜艇概率 ' + (p * 100).toFixed(1) + '%';
         }
-        if (a.best && a.best.cell === cell) cls += ' best';
+        if (a && a.best && a.best.cell === cell) cls += ' best';
       }
       if (state.pendingCell === cell) cls += ' pending';
       if (state.selected.indexOf(cell) >= 0) cls += ' selected';
@@ -500,7 +539,11 @@
 
   function methodText(a) {
     if (a.method === 'done') return '';
-    var m = a.method === 'exact' ? '精确枚举' : '采样 ' + a.samples + ' 个一致布局';
+    var m;
+    if (a.method === 'exact') m = '精确枚举 · ' + a.samples + ' 套一致布局';
+    else if (a.method === 'cluster') m = '精确枚举（命中簇优先）· ' + a.samples + ' 套一致布局';
+    else if (a.method === 'cluster-approx') m = '近似估算（命中簇部分枚举）';
+    else m = '采样 ' + a.samples + ' 个一致布局';
     return m + ' · ' + a.elapsedMs.toFixed(0) + ' ms';
   }
 
@@ -609,6 +652,13 @@
 
   function showError(msg) {
     state.error = msg;
+    var b = $('banner');
+    b.className = 'banner show';
+    b.textContent = '⚠️ ' + msg;
+  }
+
+  /* 只提示、不中断分析：用于“这一格不可能有潜艇”这类操作提示 */
+  function showHint(msg) {
     var b = $('banner');
     b.className = 'banner show';
     b.textContent = '⚠️ ' + msg;
@@ -774,7 +824,16 @@
       shootGame(cell);
     } else {
       var a = state.analysis;
-      if (a && (a.shot[cell] || a.known[cell])) return;
+      if (a) {
+        if (a.shot[cell] || a.known[cell]) return;
+        // 已排除格 / 概率为 0 的格不可能有潜艇；记成命中只会让整局记录自相矛盾，
+        // 所以这里直接拦住，并提示“多半是坐标点错了”。
+        if (a.water[cell] || a.pOcc[cell] <= 1e-12) {
+          showHint(cellName(state.game.n, cell) + ' 这一格按当前记录不可能有潜艇（已排除或概率为 0）：' +
+            '要是真实游戏里确实炸中了，请先核对坐标。');
+          return;
+        }
+      }
       state.pendingCell = cell;
       state.selected = [];
       render();
